@@ -1,9 +1,9 @@
-from flask import Flask, jsonify, request
+from flask import Flask, request
 from waitress import serve
 import requests as req
 import dotenv
 import os
-from database.mysql import query_users, insert_users
+from database.mysql import route_new_user, route_sing_in
 from log.log import logging
 
 # Load environment variables from a .env file
@@ -50,18 +50,12 @@ def init():
 @app.route('/new-user', methods=['POST'])
 def new_user():
     data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-    result = insert_users(username, password)
-    if result:
-        return jsonify({'message': 'Cadastro realizado com sucesso'}), 201
-    else:
-        return jsonify({'error': 'Usuario nao cadastrado'}), 500
+    return route_new_user(data)
 
-# Route to query information from database
-@app.route('/query', methods=['GET'])
-def query():
-    return jsonify(query_users())
+@app.route('/sing-in', methods=['POST'])
+def sing_in():
+    data = request.get_json()
+    return route_sing_in(data)
 
 # Route to handle POST requests from Uptime Kuma
 @app.route('/uptimekuma', methods=['POST'])
