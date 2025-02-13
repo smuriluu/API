@@ -20,14 +20,14 @@ def query_sing_in(username, password):
             database=DATABASE
         ) as connection:
             with connection.cursor() as cur:
-                sql = f'select id, username, password from users where username = "{username}" and password = "{password}"'
-                cur.execute(sql)
+                sql = 'select id, active from users where username = %s and password = %s'
+                params = (username, password)
+                cur.execute(sql, params)
                 result = cur.fetchone()
                 if result:
                     return {
                         'id': result[0],
-                        'username': result[1],
-                        'password': result[2]
+                        'active': result[1]
                     }
                 else:
                     return True
@@ -44,8 +44,9 @@ def query_verify_users(username):
             database=DATABASE
         ) as connection:
             with connection.cursor() as cur:
-                sql = f'select username from users where username = "{username}"'
-                cur.execute(sql)
+                sql = 'select username from users where username = %s'
+                params = (username)
+                cur.execute(sql, params)
                 result = cur.fetchone()
                 if result:
                     return result[0]
@@ -53,6 +54,48 @@ def query_verify_users(username):
                     return True
     except Exception as error:
         logging.error(f'MYSQL query_verify_users: {error}')
+        return False
+
+def query_users_verify_session(id):
+    try:
+        with pymysql.connect(
+            host=HOST,
+            user=OWNER,
+            password=PASSWORD,
+            database=DATABASE
+        ) as connection:
+            with connection.cursor() as cur:
+                sql = 'select session_last_seen from users where id = %s'
+                params = (id)
+                cur.execute(sql, params)
+                result = cur.fetchone()
+                if result[0]:
+                    return False
+                else:
+                    return True
+    except Exception:
+        return False
+
+def insert_users_new_session(id):
+    from datetime import datetime
+    if query_users_verify_session(id):
+        try:
+            with pymysql.connect(
+                host=HOST,
+                user=OWNER,
+                password=PASSWORD,
+                database=DATABASE
+            ) as connection:
+                with connection.cursor() as cur:
+                    sql = 'update users set session_last_seen = %s where id = %s'
+                    params = (datetime.now(), id)
+                    cur.execute(sql, params)
+                    connection.commit()
+                    return True
+        except Exception as error:
+            logging.error(f'MYSQL insert_users_new_session: {error}')
+            return False
+    else:
         return False
 
 # Function to insert a new user into the database
@@ -66,13 +109,31 @@ def insert_users(username, password):
             database=DATABASE
         ) as connection:
             with connection.cursor() as cur:
-                sql = f'insert into users (username, password, admin, active) values ("{username}", "{password}", 0, 1)'
-                cur.execute(sql)
+                sql = 'insert into users (username, password, admin, active, creation_date) values (%s, %s, 0, 1, sysdate())'
+                params = (username, password)
+                cur.execute(sql, params)
                 connection.commit()
                 return True
     except Exception as error:
         logging.error(f'MYSQL insert_users: {error}')
         return False
+
+def clean_expired_session():
+    from datetime import datetime, timedelta
+    try:
+        with pymysql.connect(
+            host=HOST,
+            user=OWNER,
+            password=PASSWORD,
+            database=DATABASE
+        ) as connection:
+            with connection.cursor() as cur:
+                sql = 'update users set session_id = NULL, session_last_seen = NULL where session_last_seen < %s'
+                params = (datetime.now() - timedelta(minutes=1))
+                cur.execute(sql, params)
+                connection.commit()
+    except Exception as error:
+        logging.error(f'MYSQL clean_expired_session: {error}')
 
 ### ROUTES ###
 
@@ -111,6 +172,12 @@ def route_sing_in(data):
         return jsonify({'error_code': '01'}), 500
     else:
         try:
-            return jsonify({'id': query_result['id']}), 200
-        except Exception as msg:
+            if query_result['active'] == 0:
+                return jsonify({'msg_code': '03'}), 200
+            else:
+                if insert_users_new_session(query_result['id']):
+                    return jsonify({'id': query_result['id']}), 200
+                else:
+                    return jsonify({'error_code': '08'}), 400
+        except Exception:
             return jsonify({'msg_code': '02'}), 200
